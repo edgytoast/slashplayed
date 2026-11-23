@@ -4,7 +4,7 @@
 // its own debugger stops, so the helper is a second process, an app extension the launcher starts.
 //
 // A launch is up to three requests, each a new helper process: status (the RemotePairing tunnel through
-// LocalDevVPN at 10.7.0.1:49152, and whether the developer disk image is mounted), mount (when it isn't:
+// LocalDevVPN at 10.7.0.1, and whether the developer disk image is mounted), mount (when it isn't:
 // debugserver is in it), then attach. The attach's reply only comes once the helper has detached, so the
 // launcher waits for P_TRACED instead, and loads the client once the helper is attached. Before pairing
 // and each status request, it waits for LocalDevVPN when that's off (spvpn.m), on a screen of its own.
@@ -31,6 +31,7 @@ void (^sp_launch_uikit(void))(double);  // launcher.m
 NSData *sp_pair_headset(NSString *path, void (^pump)(double), NSString **problem);  // sppair.m
 NSString *sp_vpn_wait(void (^*pump)(double), NSString *noun);  // spvpn.m
 int sp_vpn_errno(void);  // spvpn.m
+NSString *sp_vpn_endpoint(void);  // spvpn.m
 
 @interface NSObject (SPNSExtension)
 + (id)extensionWithIdentifier:(NSString *)identifier error:(NSError **)error;
@@ -167,8 +168,9 @@ static NSDictionary *read_ddi(NSString *library) {
 
 static NSString *summary(NSDictionary *reply) { return reply[@"summary"] ?: @"no summary"; }
 
-// LocalDevVPN's end of the loopback: the device's RemotePairing service, as the helper reaches it.
-#define ENDPOINTS (@[@"10.7.0.1:49152"])
+// LocalDevVPN's end of the loopback: the device's RemotePairing service, as the helper reaches it (its port
+// as sp_vpn_wait last found it).
+#define ENDPOINTS (@[sp_vpn_endpoint()])
 
 // The helper's session: the pairing record (on the headset made here when there's none), LocalDevVPN, and a
 // status request through the tunnel, which says whether the device accepts the record and whether the disk
@@ -332,11 +334,12 @@ NSString *sp_jit_attach(void (^pump)(double)) {
         return nil;
     }
     NSString *library = [NSHomeDirectory() stringByAppendingPathComponent:@"Library"];
-    NSArray *endpoints = ENDPOINTS;
     NSData *pairing = nil;
     NSDictionary *status = nil;
     NSString *problem = session(&pump, &pairing, &status);
     if (problem) return problem;
+    // After the session: its wait for LocalDevVPN may have found RemotePairing on another port (spvpn.m).
+    NSArray *endpoints = ENDPOINTS;
     if (![status[@"mounted"] boolValue]) {
         NSDictionary *ddi = read_ddi(library);
         if (!ddi) {

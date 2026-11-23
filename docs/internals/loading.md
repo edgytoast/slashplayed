@@ -51,7 +51,8 @@ new helper process. On a free Personal Team the helper takes one more of the tea
 not one of the three app slots a device has for free teams.
 
 The helper reaches the device's own developer services the way a Mac does over the network: it opens
-a RemotePairing tunnel through a loopback VPN (LocalDevVPN, at `10.7.0.1:49152`) with
+a RemotePairing tunnel through a loopback VPN (LocalDevVPN, at `10.7.0.1:49152`, or the port the device
+advertises as `_remotepairing._tcp` when that's refused) with
 [idevice](https://github.com/jkcoxson/idevice), linked statically (`scripts/build-idevice.sh`). Through
 the tunnel it starts debugserver and speaks the GDB remote protocol to it. The launcher (`spjit.m`)
 runs, before the client is loaded:
@@ -102,8 +103,12 @@ its VPN on and opens `slashplayed://` (the app's one URL type), back to the app.
 second off the main thread, is what ends the wait, so turning it on by hand works too. A refused connect
 (`ECONNREFUSED`, where LocalDevVPN off times out) means the VPN is on and the device's services refuse
 through it, which is cellular data: the tunnel works only on a joined Wi-Fi network (LocalDevVPN's issue
-31). The screen then says to join Wi-Fi or turn on Airplane Mode until the game loads, and doesn't open
-LocalDevVPN; the same connects end the wait. An app that a
+31), or RemotePairing listening on another port. So a refused connect first browses Bonjour for
+`_remotepairing._tcp` and tries each advertised port at `10.7.0.1` (only the device's own answers there),
+and that port is the helper's endpoint from then on (an iPhone on iOS 27.3 beta advertised 50022 and
+refused 49152). The browse needs local network access (the app's `NSBonjourServices` lists the type);
+without it, only 49152 is tried. When no port answers, the screen says to join Wi-Fi or turn on Airplane
+Mode until the game loads, and doesn't open LocalDevVPN; the same connects end the wait. An app that a
 debugger already holds (StikDebug launched it) skips the helper. When the device no longer accepts the
 record (the status reply says `rejected`: the tunnel's pair-verify failed and idevice asked for a
 pair-setup code), the launcher deletes it, so it's made again.

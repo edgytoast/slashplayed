@@ -4,7 +4,7 @@
 // the local network prompt is too). Pair-setup there gets the headset to show a six-digit code, which only
 // the person can read, while this request is still running: a request has one reply and no channel in, so
 // the code comes over a loopback connection to the app's listener ("pinPort"), which answers only once it
-// has been sent the request's "pinToken". The new record is proved with a tunnel through 10.7.0.1:49152,
+// has been sent the request's "pinToken". The new record is proved with a tunnel through "tunnelEndpoints",
 // then returned as bytes in the reply ("pairing"): never logged or written to disk here.
 //
 // In the helper, not the app, so idevice stays out of the launcher: one copy of it, in the one process
@@ -82,8 +82,10 @@ private let askPin: @convention(c) (UnsafeMutableRawPointer?) -> UnsafePointer<C
     return Unmanaged<PinSource>.fromOpaque(context).takeUnretainedValue().pin()
 }
 
-// Pair-setup through the first of `endpoints` that's the manual pairing service, and the new record.
-func pair(endpoints: [String], pinPort: UInt16, pinToken: String, log: @escaping (String) -> Void) throws -> Data {
+// Pair-setup through the first of `endpoints` that's the manual pairing service, and the new record, proved
+// with a tunnel through `tunnelEndpoints` (the device's RemotePairing service through LocalDevVPN).
+func pair(endpoints: [String], tunnelEndpoints: [String], pinPort: UInt16, pinToken: String,
+          log: @escaping (String) -> Void) throws -> Data {
     guard pinPort != 0, !pinToken.isEmpty else { throw HelperError("no code listener in the request") }
     var record: OpaquePointer?
     try check("generate", rp_pairing_file_generate("Slashplayed", &record))
@@ -124,7 +126,7 @@ func pair(endpoints: [String], pinPort: UInt16, pinToken: String, log: @escaping
     let data = Data(bytes: bytes, count: Int(count))
     idevice_data_free(bytes, count)
     log("new pairing record: \(data.count) bytes; trying a tunnel with it")
-    _ = try Tunnel.open(pairing: data, endpoints: ["10.7.0.1:49152"], log: log)
+    _ = try Tunnel.open(pairing: data, endpoints: tunnelEndpoints, log: log)
     return data
 }
 #endif

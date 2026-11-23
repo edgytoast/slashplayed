@@ -33,6 +33,7 @@
 
 void sp_launch_say(NSString *s);  // launcher.m
 NSDictionary *sp_jit_request(NSDictionary *req, double timeout, void (^pump)(double));  // spjit.m
+NSString *sp_vpn_endpoint(void);  // spvpn.m
 UIViewController *sp_scene_root(void);  // spvpn.m
 
 static void say(NSString *s) { sp_launch_say([@"pair: " stringByAppendingString:s]); }
@@ -147,10 +148,15 @@ void sp_screen_status(UIViewController *screen, NSString *text);  // spstyle.swi
 }
 @end
 
-// ---- the Bonjour browse for the manual pairing service, and its endpoints
+// ---- the Bonjour browse for a RemotePairing service, and its endpoints
+//
+// The headset's manual pairing service here, and the device's own RemotePairing service for spvpn.m, whose
+// port isn't always 49152 (sp_bonjour_loopbacks below).
 
 @interface SPPairBrowse : NSObject
 @property (atomic) BOOL denied;  // local network access was refused
+- (instancetype)initWithType:(const char *)type;
+- (NSArray<NSString *> *)endpoints:(void (^)(double))pump;
 @end
 
 @implementation SPPairBrowse {
@@ -159,14 +165,14 @@ void sp_screen_status(UIViewController *screen, NSString *text);  // spstyle.swi
     NSMutableDictionary<NSString *, nw_endpoint_t> *_found;
 }
 
-- (instancetype)init {
+- (instancetype)initWithType:(const char *)type {
     if (!(self = [super init])) return nil;
     _queue = dispatch_queue_create("sp.pair.bonjour", DISPATCH_QUEUE_SERIAL);
     _found = [NSMutableDictionary dictionary];
     nw_parameters_t params = nw_parameters_create_secure_tcp(NW_PARAMETERS_DISABLE_PROTOCOL,
                                                              NW_PARAMETERS_DEFAULT_CONFIGURATION);
     _browser = nw_browser_create(
-        nw_browse_descriptor_create_bonjour_service("_remotepairing-manual-pairing._tcp", NULL), params);
+        nw_browse_descriptor_create_bonjour_service(type, NULL), params);
     nw_browser_set_queue(_browser, _queue);
     __weak SPPairBrowse *weak = self;
     nw_browser_set_browse_results_changed_handler(_browser, ^(nw_browse_result_t old, nw_browse_result_t new, bool done) {
@@ -254,6 +260,21 @@ void sp_screen_status(UIViewController *screen, NSString *text);  // spstyle.swi
 }
 @end
 
+// The loopback endpoints (10.7.0.1:<port>) of every `type` service Bonjour finds within `seconds`, nil
+// when local network access was refused. Each is only a candidate: LocalDevVPN sends 10.7.0.1 back to this
+// device, so only this device's own service answers there, and another device's port is refused.
+NSArray<NSString *> *sp_bonjour_loopbacks(const char *type, double seconds, void (^pump)(double)) {
+    SPPairBrowse *browse = [[SPPairBrowse alloc] initWithType:type];
+    // Up to `seconds` for a first result; the rest come with it (one browse reply holds them all).
+    for (double end = now() + seconds; ![browse anything] && !browse.denied && now() < end;) pump(0.05);
+    if (browse.denied) return nil;
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    for (NSString *e in [browse endpoints:pump]) {
+        if ([e hasPrefix:@"10.7.0.1:"]) [out addObject:e];
+    }
+    return out;
+}
+
 // ---- the flow
 
 // Written to a new 0600 file and renamed over the old, so a half-written record is never read.
@@ -300,7 +321,7 @@ NSData *sp_pair_headset(NSString *path, void (^pump)(double), NSString **problem
         return nil;
     }
     say(@"showing the pairing screen");
-    SPPairBrowse *browse = [SPPairBrowse new];
+    SPPairBrowse *browse = [[SPPairBrowse alloc] initWithType:"_remotepairing-manual-pairing._tcp"];
     NSString *last = nil;  // why the last try failed, for the person
     NSData *record = nil;
     while (!record) {
@@ -351,7 +372,8 @@ NSData *sp_pair_headset(NSString *path, void (^pump)(double), NSString **problem
         };
         // The helper waits up to 10 minutes for the code; this waits a little longer for its reply.
         NSDictionary *reply = sp_jit_request(@{@"op": @"pair", @"endpoints": endpoints, @"pinPort": @(listener.port),
-                                               @"pinToken": listener.token}, 660, watch);
+                                               @"pinToken": listener.token, @"tunnelEndpoints": @[sp_vpn_endpoint()]},
+                                             660, watch);
         [listener close];
         sp_pair_ask(ui, NO);
         if (!reply) {

@@ -6,6 +6,12 @@ All notable changes to Slashplayed are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- On Wi-Fi, an iPhone or iPad whose developer services moved off their usual port no longer sits on
+  "Connect to Wi-Fi": Slashplayed finds the port the device advertises and starts the game. The first
+  time, it asks for local network access to do that.
+
 ## [1.6.1] - 2026-11-14
 
 ### Fixed

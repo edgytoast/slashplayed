@@ -27,8 +27,8 @@
 //            terminate-existing): how a game's Exit Game gets back to the start screen (spjit.m's
 //            sp_relaunch). The app doesn't wait for the reply; the helper outlives it.
 //   "pair"   the headset only: pair-setup with visionOS's manual pairing service at "endpoints", the code
-//            from the app over loopback ("pinPort", "pinToken"); the new record is the reply's "pairing"
-//            (Pair.swift).
+//            from the app over loopback ("pinPort", "pinToken"); the new record is the reply's "pairing",
+//            proved with a tunnel through "tunnelEndpoints" (Pair.swift).
 // The reply has "ok" and "summary", and the helper's log lines in "log", since there's no channel to
 // stream them; "rejected" when the device didn't accept the pairing record. The pairing record is parsed
 // in memory and never logged or written to disk.
@@ -84,6 +84,7 @@ final class SPHelper: NSObject, NSExtensionRequestHandling {
             // The code's listener keeps `log` only for the pairing's length.
             let data = try withoutActuallyEscaping(log) { log in
                 try pair(endpoints: request["endpoints"] as? [String] ?? [],
+                         tunnelEndpoints: request["tunnelEndpoints"] as? [String] ?? ["10.7.0.1:49152"],
                          pinPort: UInt16(truncatingIfNeeded: request["pinPort"] as? Int ?? 0),
                          pinToken: request["pinToken"] as? String ?? "", log: log)
             }
