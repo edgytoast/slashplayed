@@ -9,7 +9,8 @@
 //   sp_slice_problem), so a client the device can't load says why then, not after the attach;
 // - the helper prepares the region spguest reserved for the client's __TEXT in one brk #0xf00d stop and
 //   detaches ("guest: detached", the line the companion's ClientLauncher and run.sh follow), and the file's
-//   __TEXT is copied in through a read-write alias (the toy's pattern, guesttest/device.c);
+//   __TEXT is copied in through a read-write alias (the toy's pattern, guesttest/device.c); then the
+//   launcher's `detached` (the wait for the internet, spvpn.m), before any of the client's code runs;
 // - the client's libraries are opened through the app's rewrite-map.txt, so the shims take them;
 // - libspSystem is told where the client is (sp_set_client), since dyld never lists it, so its stubs'
 //   caller offsets, the __TEXT services (the client's dlsym'd mprotect and memcpy), and crash reports name it;
@@ -115,7 +116,7 @@ NSString *sp_guest_preflight(NSString *path) {
                                       sp_flavor_name(flavor), sp_device_noun(), problem];
 }
 
-int sp_guest_main(NSString *path, int argc, char **argv, NSString **problem) {
+int sp_guest_main(NSString *path, int argc, char **argv, void (^detached)(void), NSString **problem) {
     *problem = nil;
     NSString *text = [NSString stringWithContentsOfFile:[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"rewrite-map.txt"]
                                                encoding:NSUTF8StringEncoding error:nil];
@@ -145,6 +146,11 @@ int sp_guest_main(NSString *path, int argc, char **argv, NSString **problem) {
         *problem = retired ? [NSString stringWithFormat:@"%s; it's deleted, so the next start gets it again", err] : @(err);
         return 1;
     }
+    // The helper has prepared __TEXT and detached (prepare_text), and none of the client's code has run yet.
+    // Timed apart: the wait can be minutes offline, which isn't the load's.
+    double t_net = now();
+    detached();
+    t_net = now() - t_net;
     // libspSystem is loaded (launcher.m's first line), so it knows before the client's first call into a shim.
     void (*set_client)(const struct mach_header *, intptr_t, const char *, uintptr_t) = dlsym(RTLD_DEFAULT, "sp_set_client");
     if (!set_client) {
@@ -167,8 +173,9 @@ int sp_guest_main(NSString *path, int argc, char **argv, NSString **problem) {
     else say(@"audio: can't refuse the microphone: voice chat settings may stop the app");
     double load, link, init;
     spguest_times(g, &load, &link, &init);
-    say([NSString stringWithFormat:@"loaded and linked in %.3f s (prepare %.3f s, detach %.3f s, load %.3f s with both, link %.3f s); "
-                                   @"initializers, then main", now() - t0, t_prepare, t_detach, load, link]);
+    say([NSString stringWithFormat:@"loaded and linked in %.3f s (prepare %.3f s, detach %.3f s, load %.3f s with both, link %.3f s), "
+                                   @"plus %.3f s for the internet; initializers, then main",
+                                   now() - t0 - t_net, t_prepare, t_detach, load, link, t_net]);
     const char *apple[] = {path.fileSystemRepresentation, NULL};
     return spguest_run(g, argc, (const char **)argv, (const char **)environ, apple);
 }
